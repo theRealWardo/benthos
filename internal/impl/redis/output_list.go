@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-redis/redis/v7"
 
 	ibatch "github.com/benthosdev/benthos/v4/internal/batch"
@@ -57,12 +59,15 @@ func newRedisListOutput(conf output.Config, mgr bundle.NewManagement) (output.St
 	if err != nil {
 		return nil, err
 	}
+	mgr.Logger().Debugf("REDIS_LIST CREATED\n")
 	return batcher.NewFromConfig(conf.RedisList.Batching, a, mgr)
 }
 
 type redisListWriter struct {
 	mgr bundle.NewManagement
 	log log.Modular
+
+	backoff backoff.BackOff
 
 	conf output.RedisListConfig
 
@@ -74,9 +79,10 @@ type redisListWriter struct {
 
 func newRedisListWriter(conf output.RedisListConfig, mgr bundle.NewManagement) (*redisListWriter, error) {
 	r := &redisListWriter{
-		mgr:  mgr,
-		log:  mgr.Logger(),
-		conf: conf,
+		mgr:     mgr,
+		log:     mgr.Logger(),
+		conf:    conf,
+		backoff: backoff.WithMaxRetries(backoff.NewConstantBackOff(time.Second), 2),
 	}
 
 	var err error
@@ -90,17 +96,38 @@ func newRedisListWriter(conf output.RedisListConfig, mgr bundle.NewManagement) (
 	return r, nil
 }
 
+func (r *redisListWriter) reconnectOrError(ctx context.Context, msg message.Batch, err error) error {
+	return err
+	/*
+		tNext := r.backoff.NextBackOff()
+		if tNext == backoff.Stop {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(tNext):
+		}
+		return component.ErrNotConnected
+	*/
+}
+
 func (r *redisListWriter) Connect(ctx context.Context) error {
 	r.connMut.Lock()
 	defer r.connMut.Unlock()
 
 	client, err := clientFromConfig(r.mgr.FS(), r.conf.Config)
 	if err != nil {
+		r.log.Debugf("client err: %s\n", err)
 		return err
 	}
-	if _, err = client.Ping().Result(); err != nil {
-		return err
-	}
+
+	/*
+		if _, err = client.Ping().Result(); err != nil {
+			r.log.Debugf("ping err: %s\n", err)
+			return err
+		}
+	*/
 
 	r.client = client
 	return nil
@@ -112,6 +139,7 @@ func (r *redisListWriter) WriteBatch(ctx context.Context, msg message.Batch) err
 	r.connMut.RUnlock()
 
 	if client == nil {
+		r.log.Debugf("Redis is not connected\n")
 		return component.ErrNotConnected
 	}
 
@@ -120,7 +148,7 @@ func (r *redisListWriter) WriteBatch(ctx context.Context, msg message.Batch) err
 		if err := client.RPush(key, msg.Get(0).AsBytes()).Err(); err != nil {
 			_ = r.disconnect()
 			r.log.Errorf("Error from redis: %v\n", err)
-			return component.ErrNotConnected
+			return r.reconnectOrError(ctx, msg, fmt.Errorf("error from redis: %v", err))
 		}
 		return nil
 	}
@@ -135,7 +163,7 @@ func (r *redisListWriter) WriteBatch(ctx context.Context, msg message.Batch) err
 	if err != nil {
 		_ = r.disconnect()
 		r.log.Errorf("Error from redis: %v\n", err)
-		return component.ErrNotConnected
+		return r.reconnectOrError(ctx, msg, fmt.Errorf("error from redis: %v", err))
 	}
 
 	var batchErr *ibatch.Error
@@ -144,10 +172,12 @@ func (r *redisListWriter) WriteBatch(ctx context.Context, msg message.Batch) err
 			if batchErr == nil {
 				batchErr = ibatch.NewError(msg, res.Err())
 			}
+			r.log.Debugf("batch failed\n")
 			batchErr.Failed(i, res.Err())
 		}
 	}
 	if batchErr != nil {
+		r.log.Debugf("batch error: %v\n", batchErr)
 		return batchErr
 	}
 	return nil

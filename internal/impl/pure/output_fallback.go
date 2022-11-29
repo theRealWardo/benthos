@@ -10,6 +10,7 @@ import (
 	"github.com/benthosdev/benthos/v4/internal/component/output"
 	"github.com/benthosdev/benthos/v4/internal/component/output/processors"
 	"github.com/benthosdev/benthos/v4/internal/docs"
+	"github.com/benthosdev/benthos/v4/internal/log"
 	"github.com/benthosdev/benthos/v4/internal/message"
 	"github.com/benthosdev/benthos/v4/internal/shutdown"
 )
@@ -94,7 +95,7 @@ func newFallback(conf output.Config, mgr bundle.NewManagement) (output.Streamed,
 	}
 
 	var t *fallbackBroker
-	if t, err = newFallbackBroker(outputs); err != nil {
+	if t, err = newFallbackBroker(outputs, mgr.Logger()); err != nil {
 		return nil, err
 	}
 	return t, nil
@@ -107,13 +108,15 @@ type fallbackBroker struct {
 	outputs       []output.Streamed
 
 	shutSig *shutdown.Signaller
+	log     log.Modular
 }
 
-func newFallbackBroker(outputs []output.Streamed) (*fallbackBroker, error) {
+func newFallbackBroker(outputs []output.Streamed, log log.Modular) (*fallbackBroker, error) {
 	t := &fallbackBroker{
 		transactions: nil,
 		outputs:      outputs,
 		shutSig:      shutdown.NewSignaller(),
+		log:          log,
 	}
 	if len(outputs) == 0 {
 		return nil, errors.New("missing outputs")
@@ -182,8 +185,10 @@ func (t *fallbackBroker) loop() {
 		ackFn = func(ctx context.Context, err error) error {
 			i++
 			if err == nil || len(t.outputTSChans) <= i {
+				t.log.Debugf("used output %d\n", i-1)
 				return tran.Ack(ctx, err)
 			}
+			t.log.Debugf("fallback due to error from output %d: %v\n", i-1, err)
 			newPayload := tran.Payload.ShallowCopy()
 			_ = newPayload.Iter(func(i int, p *message.Part) error {
 				p.MetaSetMut("fallback_error", err.Error())
@@ -197,6 +202,7 @@ func (t *fallbackBroker) loop() {
 			return nil
 		}
 
+		t.log.Debugf("writing to output %d\n", i)
 		select {
 		case t.outputTSChans[i] <- message.NewTransactionFunc(tran.Payload.ShallowCopy(), ackFn):
 		case <-t.shutSig.CloseAtLeisureChan():
