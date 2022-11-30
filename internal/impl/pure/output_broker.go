@@ -121,10 +121,7 @@ func newBroker(conf output.Config, mgr bundle.NewManagement) (output.Streamed, e
 
 	outputs := make([]output.Streamed, lOutputs)
 
-	_, isRetryWrapped := map[string]struct{}{
-		"fan_out":            {},
-		"fan_out_sequential": {},
-	}[conf.Broker.Pattern]
+	isRetryWrapped := false
 
 	var err error
 	for j := 0; j < conf.Broker.Copies; j++ {
@@ -148,7 +145,7 @@ func newBroker(conf output.Config, mgr bundle.NewManagement) (output.Streamed, e
 	case "fan_out":
 		b, err = newFanOutOutputBroker(outputs)
 	case "fan_out_sequential":
-		b, err = newFanOutSequentialOutputBroker(outputs)
+		b, err = newFanOutSequentialOutputBroker(outputs, mgr)
 	case "round_robin":
 		b, err = newRoundRobinOutputBroker(outputs)
 	case "greedy":
