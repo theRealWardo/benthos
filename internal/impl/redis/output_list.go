@@ -59,7 +59,6 @@ func newRedisListOutput(conf output.Config, mgr bundle.NewManagement) (output.St
 	if err != nil {
 		return nil, err
 	}
-	mgr.Logger().Debugf("REDIS_LIST CREATED\n")
 	return batcher.NewFromConfig(conf.RedisList.Batching, a, mgr)
 }
 
@@ -118,7 +117,6 @@ func (r *redisListWriter) Connect(ctx context.Context) error {
 
 	client, err := clientFromConfig(r.mgr.FS(), r.conf.Config)
 	if err != nil {
-		r.log.Debugf("client err: %s\n", err)
 		return err
 	}
 
@@ -139,7 +137,6 @@ func (r *redisListWriter) WriteBatch(ctx context.Context, msg message.Batch) err
 	r.connMut.RUnlock()
 
 	if client == nil {
-		r.log.Debugf("Redis is not connected\n")
 		return component.ErrNotConnected
 	}
 
@@ -172,12 +169,10 @@ func (r *redisListWriter) WriteBatch(ctx context.Context, msg message.Batch) err
 			if batchErr == nil {
 				batchErr = ibatch.NewError(msg, res.Err())
 			}
-			r.log.Debugf("batch failed\n")
 			batchErr.Failed(i, res.Err())
 		}
 	}
 	if batchErr != nil {
-		r.log.Debugf("batch error: %v\n", batchErr)
 		return batchErr
 	}
 	return nil

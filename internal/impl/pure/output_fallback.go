@@ -185,10 +185,8 @@ func (t *fallbackBroker) loop() {
 		ackFn = func(ctx context.Context, err error) error {
 			i++
 			if err == nil || len(t.outputTSChans) <= i {
-				t.log.Debugf("used output %d\n", i-1)
 				return tran.Ack(ctx, err)
 			}
-			t.log.Debugf("fallback due to error from output %d: %v\n", i-1, err)
 			newPayload := tran.Payload.ShallowCopy()
 			_ = newPayload.Iter(func(i int, p *message.Part) error {
 				p.MetaSetMut("fallback_error", err.Error())
@@ -202,7 +200,6 @@ func (t *fallbackBroker) loop() {
 			return nil
 		}
 
-		t.log.Debugf("writing to output %d\n", i)
 		select {
 		case t.outputTSChans[i] <- message.NewTransactionFunc(tran.Payload.ShallowCopy(), ackFn):
 		case <-t.shutSig.CloseAtLeisureChan():
