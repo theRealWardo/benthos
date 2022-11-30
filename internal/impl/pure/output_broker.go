@@ -145,7 +145,7 @@ func newBroker(conf output.Config, mgr bundle.NewManagement) (output.Streamed, e
 	case "fan_out":
 		b, err = newFanOutOutputBroker(outputs)
 	case "fan_out_sequential":
-		b, err = newFanOutSequentialOutputBroker(outputs, mgr)
+		b, err = newFanOutSequentialOutputBroker(outputs)
 	case "round_robin":
 		b, err = newRoundRobinOutputBroker(outputs)
 	case "greedy":
