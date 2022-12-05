@@ -1,4 +1,4 @@
-module github.com/benthosdev/benthos/v4
+module github.com/theRealWardo/benthos/v4
 
 require (
 	cloud.google.com/go/bigquery v1.42.0
